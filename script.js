@@ -292,9 +292,9 @@ const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
         // --- LOGIC HELPERS ---
 
-        const hashPassword = async (password) => {
-                    const msgBuffer = new TextEncoder().encode(password);
-                    // Uses the browser's built-in, highly secure SHA-256 algorithm
+        const hashPassword = async (password, salt) => {
+                    const combinedText = password + salt;
+                    const msgBuffer = new TextEncoder().encode(combinedText);
                     const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
                     const hashArray = Array.from(new Uint8Array(hashBuffer));
                     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -1514,107 +1514,100 @@ const { useState, useEffect, useMemo, useCallback, useRef } = React;
                 setTimeout(() => setSuccessMsg(''), 2000);
             };
 
-const handleAction = async () => {
-                setErrorMsg('');
-                setSuccessMsg('');
-                
-                if (!nickname.trim() || !password) return setErrorMsg('Preencha os dados.');
-                
-                const lowerNick = nickname.toLowerCase().trim();
-                const userMatch = authList.find(u => u.nickname === lowerNick);
-                
-                if (!userMatch) {
-                    return setErrorMsg('Acesso negado. Nickname não listado no CFO.');
-                }
-
-                setIsProcessing(true);
-
-                try {
-                    if (!window.firebaseDB) {
-                        setIsProcessing(false);
-                        return setErrorMsg('Erro interno: Conexão com banco de dados não estabelecida.');
-                    }
-
-                    const userRef = window.firebaseDoc(window.firebaseDB, "cfo_passwords", lowerNick);
-                    
-                    // 🔒 SCRAMBLE THE PASSWORD IMMEDIATELY
-                    const hashedPassword = await hashPassword(password);
-
-                    // =====================================
-                    // LOGIN MODE
-                    // =====================================
-                    if (mode === 'login') {
-                        const userSnap = await window.firebaseGetDoc(userRef);
+        const handleAction = async () => {
+                        setErrorMsg('');
+                        setSuccessMsg('');
                         
-                        // Compare the HASHED input with the HASH in the database
-                        if (!userSnap.exists() || userSnap.data().password !== hashedPassword) {
-                            setIsProcessing(false);
-                            return setErrorMsg('Credenciais incorretas ou usuário não cadastrado.');
-                        }
+                        if (!nickname.trim() || !password) return setErrorMsg('Preencha os dados.');
                         
-                        onLoginSuccess({ nickname: userMatch.originalNick || userMatch.nickname, role: userMatch.role }, rememberMe);
-                        return;
-                    } 
-                    
-                    // =====================================
-                    // REGISTER / RESET MODE
-                    // =====================================
-                    else if (mode === 'register' || mode === 'reset') {
-                        const userSnap = await window.firebaseGetDoc(userRef);
-
-                        if (mode === 'register' && userSnap.exists()) {
-                            setIsProcessing(false);
-                            return setErrorMsg('Usuário já registrado! Faça login ou redefina sua senha.');
-                        }
-
-                        if (mode === 'reset' && !userSnap.exists()) {
-                            setIsProcessing(false);
-                            return setErrorMsg('Usuário não registrado! Crie uma conta primeiro.');
-                        }
-
-                        if (password !== confirmPassword) {
-                            setIsProcessing(false);
-                            return setErrorMsg('As senhas não coincidem.');
-                        }
-                        if (!isValidPassword(password)) {
-                            setIsProcessing(false);
-                            return setErrorMsg('A senha deve ter mais de 8 caracteres e conter símbolos.');
-                        }
-
-                        const profile = await fetchHabboProfile(userMatch.originalNick || nickname.trim());
+                        const lowerNick = nickname.toLowerCase().trim();
+                        const userMatch = authList.find(u => u.nickname === lowerNick);
                         
-                        if (!profile) {
-                            setIsProcessing(false);
-                            return setErrorMsg('Falha ao acessar API Habbo. Verifique se seu perfil está público.');
-                        }
-                        
-                        if (profile.motto !== validationCode) {
-                            setIsProcessing(false);
-                            return setErrorMsg('O código na sua missão não corresponde ao gerado.');
+                        if (!userMatch) {
+                            return setErrorMsg('Acesso negado. Nickname não listado no CFO.');
                         }
 
-                        await window.firebaseSetDoc(userRef, {
-                            password: hashedPassword, 
-                            originalNick: userMatch.originalNick || userMatch.nickname,
-                            role: userMatch.role,
-                            updatedAt: new Date().toISOString()
-                        });
-                        
-                        if (mode === 'register') {
-                            onLoginSuccess({ nickname: userMatch.originalNick || userMatch.nickname, role: userMatch.role }, rememberMe);
-                        } else {
-                            setSuccessMsg('Senha redefinida com sucesso!');
-                            setMode('login');
-                        }
-                    }
+                        setIsProcessing(true);
 
-                } catch(e) {
-                    console.error(e);
-                    setErrorMsg('Ocorreu um erro interno. Verifique a conexão.');
-                } finally {
-                    setIsProcessing(false);
-                }
-            };
+                        try {
+                            if (!window.firebaseDB) {
+                                setIsProcessing(false);
+                                return setErrorMsg('Erro interno: Conexão com banco de dados não estabelecida.');
+                            }
+
+                            const userRef = window.firebaseDoc(window.firebaseDB, "cfo_passwords", lowerNick);
+                            
+                            const hashedPassword = await hashPassword(password, lowerNick);
+
+                            if (mode === 'login') {
+                                const userSnap = await window.firebaseGetDoc(userRef);
+                                
+                                // Compara o hash gerado com o hash salvo no banco
+                                if (!userSnap.exists() || userSnap.data().password !== hashedPassword) {
+                                    setIsProcessing(false);
+                                    return setErrorMsg('Credenciais incorretas ou usuário não cadastrado.');
+                                }
+                                
+                                onLoginSuccess({ nickname: userMatch.originalNick || userMatch.nickname, role: userMatch.role }, rememberMe);
+                                return;
+                            } 
+                            
+                            else if (mode === 'register' || mode === 'reset') {
+                                const userSnap = await window.firebaseGetDoc(userRef);
+
+                                if (mode === 'register' && userSnap.exists()) {
+                                    setIsProcessing(false);
+                                    return setErrorMsg('Usuário já registrado! Faça login ou redefina sua senha.');
+                                }
+
+                                if (mode === 'reset' && !userSnap.exists()) {
+                                    setIsProcessing(false);
+                                    return setErrorMsg('Usuário não registrado! Crie uma conta primeiro.');
+                                }
+
+                                if (password !== confirmPassword) {
+                                    setIsProcessing(false);
+                                    return setErrorMsg('As senhas não coincidem.');
+                                }
+                                if (!isValidPassword(password)) {
+                                    setIsProcessing(false);
+                                    return setErrorMsg('A senha deve ter mais de 8 caracteres e conter símbolos.');
+                                }
+
+                                const profile = await fetchHabboProfile(userMatch.originalNick || nickname.trim());
+                                
+                                if (!profile) {
+                                    setIsProcessing(false);
+                                    return setErrorMsg('Falha ao acessar API Habbo. Verifique se seu perfil está público.');
+                                }
+                                
+                                if (profile.motto !== validationCode) {
+                                    setIsProcessing(false);
+                                    return setErrorMsg('O código na sua missão não corresponde ao gerado.');
+                                }
+
+                                await window.firebaseSetDoc(userRef, {
+                                    password: hashedPassword,
+                                    originalNick: userMatch.originalNick || userMatch.nickname,
+                                    role: userMatch.role,
+                                    updatedAt: new Date().toISOString()
+                                });
+                                
+                                if (mode === 'register') {
+                                    onLoginSuccess({ nickname: userMatch.originalNick || userMatch.nickname, role: userMatch.role }, rememberMe);
+                                } else {
+                                    setSuccessMsg('Senha redefinida com sucesso!');
+                                    setMode('login');
+                                }
+                            }
+
+                        } catch(e) {
+                            console.error(e);
+                            setErrorMsg('Ocorreu um erro interno. Verifique a conexão.');
+                        } finally {
+                            setIsProcessing(false);
+                        }
+                    };
 
             if (isLoading || initialLoading) {
                 return (
