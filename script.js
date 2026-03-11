@@ -291,6 +291,15 @@ const { useState, useEffect, useMemo, useCallback, useRef } = React;
         };
 
         // --- LOGIC HELPERS ---
+
+        const hashPassword = async (password) => {
+                    const msgBuffer = new TextEncoder().encode(password);
+                    // Uses the browser's built-in, highly secure SHA-256 algorithm
+                    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+                    const hashArray = Array.from(new Uint8Array(hashBuffer));
+                    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+                };
+
         const generateId = () => Math.random().toString(36).substr(2, 9);
         const parseRowsToBlocks = (rows) => {
             let i = 0;
@@ -1505,7 +1514,7 @@ const { useState, useEffect, useMemo, useCallback, useRef } = React;
                 setTimeout(() => setSuccessMsg(''), 2000);
             };
 
-            const handleAction = async () => {
+const handleAction = async () => {
                 setErrorMsg('');
                 setSuccessMsg('');
                 
@@ -1526,32 +1535,38 @@ const { useState, useEffect, useMemo, useCallback, useRef } = React;
                         return setErrorMsg('Erro interno: Conexão com banco de dados não estabelecida.');
                     }
 
-                    // Acessa o documento com base no nome do usuário em minúsculo na coleção cfo_passwords
                     const userRef = window.firebaseDoc(window.firebaseDB, "cfo_passwords", lowerNick);
+                    
+                    // 🔒 SCRAMBLE THE PASSWORD IMMEDIATELY
+                    const hashedPassword = await hashPassword(password);
 
+                    // =====================================
+                    // LOGIN MODE
+                    // =====================================
                     if (mode === 'login') {
                         const userSnap = await window.firebaseGetDoc(userRef);
                         
-                        if (!userSnap.exists() || userSnap.data().password !== password) {
+                        // Compare the HASHED input with the HASH in the database
+                        if (!userSnap.exists() || userSnap.data().password !== hashedPassword) {
                             setIsProcessing(false);
                             return setErrorMsg('Credenciais incorretas ou usuário não cadastrado.');
                         }
                         
-                        // Success Login
                         onLoginSuccess({ nickname: userMatch.originalNick || userMatch.nickname, role: userMatch.role }, rememberMe);
                         return;
                     } 
                     
+                    // =====================================
+                    // REGISTER / RESET MODE
+                    // =====================================
                     else if (mode === 'register' || mode === 'reset') {
                         const userSnap = await window.firebaseGetDoc(userRef);
 
-                        // SEGURANÇA: Impede registro se a conta já existir no Firestore
                         if (mode === 'register' && userSnap.exists()) {
                             setIsProcessing(false);
                             return setErrorMsg('Usuário já registrado! Faça login ou redefina sua senha.');
                         }
 
-                        // SEGURANÇA: Impede redefinição de senha se a conta não estiver registrada
                         if (mode === 'reset' && !userSnap.exists()) {
                             setIsProcessing(false);
                             return setErrorMsg('Usuário não registrado! Crie uma conta primeiro.');
@@ -1578,9 +1593,8 @@ const { useState, useEffect, useMemo, useCallback, useRef } = React;
                             return setErrorMsg('O código na sua missão não corresponde ao gerado.');
                         }
 
-                        // Success Registration / Reset: Save password and metadata to Firestore
                         await window.firebaseSetDoc(userRef, {
-                            password: password,
+                            password: hashedPassword, 
                             originalNick: userMatch.originalNick || userMatch.nickname,
                             role: userMatch.role,
                             updatedAt: new Date().toISOString()
